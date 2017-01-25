@@ -24,7 +24,7 @@ int main(int argc,char *argv[])
   /* parse command line args */
   if (argc != 3)
   {
-    fprintf(stderr, "usage: http_server1 k|u port\n");
+    fprintf(stderr, "usage: http_server2 k|u port\n");
     exit(-1);
   }
   server_port = atoi(argv[2]);
@@ -35,42 +35,94 @@ int main(int argc,char *argv[])
   }
 
   /* initialize and make socket */
+   if (toupper(*(argv[1])) == 'K') { 
+  minet_init(MINET_KERNEL);
+    } else if (toupper(*(argv[1])) == 'U') { 
+  minet_init(MINET_USER);
+    } else {
+  fprintf(stderr, "First argument must be k or u\n");
+  exit(-1);
+    }
+  sock = minet_socket(SOCK_STREAM);
 
   /* set server address*/
+  memset(&sa, 0, sizeof(sa));
+  sa.sin_family = AF_INET;
+  sa.sin_port = htons(server_port);
+  sa.sin_addr.s_addr = htonl(INADDR_ANY);
 
   /* bind listening socket */
+  if(minet_bind(sock, &sa) < 0){
+    fprintf(stderr, "Cannot bind a socket\n");
+    minet_close(sock);
+    exit(-1);
+  }
 
   /* start listening */
+  if(minet_listen(sock, 5) < 0){
+    fprintf(stderr, "Cannot listen a socket\n");
+    minet_close(sock);
+    exit(-1);
+  }
+
+  FD_ZERO(&connections);
+  FD_ZERO(&readlist);
+  FD_SET(sock, &connections);
+  maxfd = sock;
 
   /* connection handling loop */
   while(1)
   {
     /* create read list */
-
+    readlist = connections;
     /* do a select */
-
+    if(minet_select(maxfd+1, &readlist, NULL, NULL, NULL) < 1){
+      fprintf(stderr,"Cannot select a socket!\n");
+      minet_close(sock);
+      exit(-1);
+    }
     /* process sockets that are ready */
-
-      /* for the accept socket, add accepted connection to connections */
-      if (i == sock)
-      {
+    for(i = 0; i<= maxfd; i++){
+      if(FD_ISSET(i, &readlist)){
+        /* for the accept socket, add accepted connection to connections */
+        if(i == sock){
+          if((sock2 = minet_accept(sock, &sa2))){
+            FD_SET(sock2, &connections);
+            if(sock2 > maxfd){
+              maxfd = sock2;
+            }
+          }else{
+            fprintf(stderr, "Cannot accept!\n");
+            continue;
+          }
+        }else{
+          /* for a connection socket, handle the connection */
+          rc = handle_connection(i);
+          FD_CLR(i, &connections);
+          if(i == maxfd){
+            for(int j = maxfd; j > 0; j--){
+              if(FD_ISSET(j, &connections)){
+                maxfd = j;
+                break;
+              }
+            }
+          }
+        }
       }
-      else /* for a connection socket, handle the connection */
-      {
-	rc = handle_connection(i);
-      }
+    }
+      
   }
 }
 
 int handle_connection(int sock2)
 {
   char filename[FILENAMESIZE+1];
-  int rc;
-  int fd;
+  //int rc;
+  //int fd;
   struct stat filestat;
   char buf[BUFSIZE+1];
-  char *headers;
-  char *endheaders;
+  //char *headers;
+  //char *endheaders;
   char *bptr;
   int datalen=0;
   char *ok_response_f = "HTTP/1.0 200 OK\r\n"\
@@ -85,39 +137,120 @@ int handle_connection(int sock2)
   bool ok=true;
 
   /* first read loop -- get request and headers*/
+//while(strlen(buf) < 4|| strcmp(buf+strlen(buf)-4, "\r\n\r\n") != 0){ 
+ if(readnbytes(sock2,buf, BUFSIZE) < 0){
+    fprintf(stderr, "Cannot read request!\n");
+    //minet_close(sock2);
+    //要从connections删掉吗？
+    //exit(-1);
+    ok = false;
+  }
 
+//}
   /* parse request to get file name */
-  /* Assumption: this is a GET request and filename contains no spaces*/
-
-    /* try opening the file */
-
+  /* Assumption: this is a GET request and filename contains no spaces*/  
+  char *requestMethod = strtok(buf," ");
+  if(requestMethod == NULL || strcasecmp(requestMethod, "GET") != 0){
+    fprintf(stderr, "Please choose request method!\n");
+    //writenbytes(sock2, notok_response, strlen(notok_response));
+    //minet_close(sock2);
+    //exit(-1);
+    ok = false;
+  }
+  char *object = strtok(NULL," ");
+  if(object == NULL){
+    fprintf(stderr, "Please insert filename\n");
+   // writenbytes(sock2, notok_response, strlen(notok_response));
+    //minet_close(sock2);
+    //exit(-1);
+    ok = false;
+  }
+  //delete the '/' if the input filename has it
+  if (object[0] == '/'){
+    object++;
+  }
+  char *version = strtok(NULL,"\r\n");
+  if(version == NULL || strcasecmp(version,"HTTP/1.0") != 0){
+    fprintf(stderr, "Please use HTTP/1.0\n");
+    //writenbytes(sock2, notok_response, strlen(notok_response));
+    //minet_close(sock2);
+    //exit(-1);
+    ok = false;
+  }
+  //acquire filepath
+  memset(filename, 0, FILENAMESIZE + 1); 
+  getcwd(filename, FILENAMESIZE);
+  filename[strlen(filename)] = '/';//add '/' at the end of file path
+  strncpy(filename + strlen(filename), object, strlen(object));
+  /* try opening the file */
+  if(stat(filename, &filestat) < 0){
+    fprintf(stderr, "Cannot find the file!\n");
+    ok = false;
+  }else{
+    datalen = filestat.st_size;
+    bptr = (char *)malloc(datalen);
+    memset(bptr, 0, datalen);
+    FILE *stream = fopen(filename, "r");
+    if(fread(bptr, sizeof( char ), datalen, stream) < 0){
+      fprintf(stderr, "Cannot read file!\n");
+    }
+    fclose(stream);
+  }
+  /*
+if(strtok(NULL,"") != "\r\n"){
+    ok = false;
+  }
+*/
   /* send response */
   if (ok)
   {
     /* send headers */
-
+    snprintf(ok_response, sizeof(ok_response), ok_response_f, datalen);
+    if(writenbytes(sock2, ok_response, strlen(ok_response)) < 0){
+      fprintf(stderr, "Cannot send headers!\n");
+      minet_close(sock2);
+      //exit(-1);
+    }
     /* send file */
-  }
-  else	// send error response
-  {
+    if(writenbytes(sock2, bptr, datalen) < 0){
+      fprintf(stderr, "Cannot send file!\n");
+      minet_close(sock2);
+      //exit(-1);
+    }else {
+      minet_close(sock2);
+      return 0;
+    }
+  }else{	// send error response
+    if(writenbytes(sock2, notok_response, strlen(notok_response)) < 0){
+      fprintf(stderr, "Cannot send error response!\n");
+      minet_close(sock2);
+      //exit(-1);
+    }else{
+      minet_close(sock2);
+      return 0;
+    }
   }
 
   /* close socket and free space */
-
-  if (ok)
-    return 0;
-  else
-    return -1;
+  minet_close(sock2);
+  free(bptr);
+  return -1;
 }
 
 int readnbytes(int fd,char *buf,int size)
 {
   int rc = 0;
   int totalread = 0;
-  while ((rc = minet_read(fd,buf+totalread,size-totalread)) > 0)
-    totalread += rc;
 
-  if (rc < 0)
+ while ((rc = minet_read(fd,buf+totalread,size-totalread)) > 0){
+    totalread += rc;
+    if (totalread >= 2){
+        if(buf[totalread-1] == '\n' && buf[totalread-2] == '\r' && buf[totalread-3] == '\n' && buf[totalread-4] == '\r'){
+	break;
+      }
+    }
+  }
+ if (rc < 0)
   {
     return -1;
   }
@@ -137,4 +270,3 @@ int writenbytes(int fd,char *str,int size)
   else
     return totalwritten;
 }
-

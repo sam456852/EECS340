@@ -17,7 +17,7 @@ int main(int argc, char * argv[]) {
     bool ok = true;
     struct sockaddr_in sa;
     FILE * wheretoprint = stdout;
-    s	 * site = NULL;
+    struct hostent * site = NULL;
     char * req = NULL;
 
     char buf[BUFSIZE + 1];
@@ -51,37 +51,16 @@ int main(int argc, char * argv[]) {
     }
 
     /* create socket */
-    sock = minet_socket(SOCK_STREAM);
-    if(sock == 1) return sock;
+
     // Do DNS lookup
     /* Hint: use gethostbyname() */
-    site = gethostbyname(server_name);
-    if(host == null){
-    	fprintf(stderr, "No such server!\n");
-    	minet_close(sock);
-    	exit(-1);
-    }
+
     /* set address */
-    memset(&sa,0,sizeof sa);
-    sa.sin_port=htons(server_port);
-    sa.sin_addr.s_addr=*(unsigned long *)site->h_addr_list[0];
-    sa.sin_family=AF_INET;
+
     /* connect socket */
-    if(minet_connect(sock, &sa) != 0){
-    	fprintf(stderr, "Cannot connect!\n");
-    	minet_close(sock);
-    	exit(-1);
-    }
+    
     /* send request */
-    req = (char *)malloc(strlen(server_path) + 15);
-    sprintf(req, "GET %s HTTP/1.0\r\n", server_path);
-    datalen = strlen(req);
-    rc = minet_write(sock, req, datalen);
-    if(rc < 0){
-    	fprintf(stderr, "Cannot send request!\n");
-    	minet_close(sock);
-    	exit(-1);
-    }
+
     /* wait till socket can be read */
     /* Hint: use select(), and ignore timeout for now. */
     
@@ -97,8 +76,7 @@ int main(int argc, char * argv[]) {
     /* second read loop -- print out the rest of the response */
     
     /*close socket and deinitialize */
-    minet_close(int sock);
-    minet_deinit();
+
 
     if (ok) {
 	return 0;
